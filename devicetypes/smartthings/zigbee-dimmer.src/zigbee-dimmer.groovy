@@ -13,17 +13,19 @@
  */
 
 metadata {
-    definition (name: "ZigBee Dimmer", namespace: "smartthings", author: "SmartThings") {
+    definition (name: "ZigBee Dimmer", namespace: "smartthings", author: "SmartThings", ocfDeviceType: "oic.d.light") {
         capability "Actuator"
         capability "Configuration"
         capability "Refresh"
         capability "Switch"
         capability "Switch Level"
         capability "Health Check"
+        capability "Light"
 
 
         fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008"
         fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008, 0B04, FC0F", outClusters: "0019", manufacturer: "OSRAM", model: "LIGHTIFY A19 ON/OFF/DIM", deviceJoinName: "SYLVANIA Smart A19 Soft White"
+        fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008, FC0F", outClusters: "0019", manufacturer: "OSRAM", model: "LIGHTIFY A19 ON/OFF/DIM 10 Year", deviceJoinName: "SYLVANIA Smart 10-Year A19"
         fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008, FF00", outClusters: "0019", manufacturer: "MRVL", model: "MZ100", deviceJoinName: "Wemo Bulb"
         fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008, 0B05", outClusters: "0019", manufacturer: "OSRAM SYLVANIA", model: "iQBR30", deviceJoinName: "Sylvania Ultra iQ"
         fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008, FC0F", outClusters: "0019", manufacturer: "OSRAM", model: "LIGHTIFY PAR38 ON/OFF/DIM", deviceJoinName: "SYLVANIA Smart PAR38 Soft White"
@@ -37,9 +39,9 @@ metadata {
     tiles(scale: 2) {
         multiAttributeTile(name:"switch", type: "lighting", width: 6, height: 4, canChangeIcon: true){
             tileAttribute ("device.switch", key: "PRIMARY_CONTROL") {
-                attributeState "on", label:'${name}', action:"switch.off", icon:"st.switches.light.on", backgroundColor:"#79b821", nextState:"turningOff"
+                attributeState "on", label:'${name}', action:"switch.off", icon:"st.switches.light.on", backgroundColor:"#00A0DC", nextState:"turningOff"
                 attributeState "off", label:'${name}', action:"switch.on", icon:"st.switches.light.off", backgroundColor:"#ffffff", nextState:"turningOn"
-                attributeState "turningOn", label:'${name}', action:"switch.off", icon:"st.switches.light.on", backgroundColor:"#79b821", nextState:"turningOff"
+                attributeState "turningOn", label:'${name}', action:"switch.off", icon:"st.switches.light.on", backgroundColor:"#00A0DC", nextState:"turningOff"
                 attributeState "turningOff", label:'${name}', action:"switch.on", icon:"st.switches.light.off", backgroundColor:"#ffffff", nextState:"turningOn"
             }
             tileAttribute ("device.level", key: "SLIDER_CONTROL") {
@@ -93,7 +95,13 @@ def on() {
 }
 
 def setLevel(value) {
-    zigbee.setLevel(value)
+    def additionalCmds = []
+    if (device.getDataValue("model") == "iQBR30" && value.toInteger() > 0) { // Handle iQ bulb not following spec
+        additionalCmds = zigbee.on()
+    } else if (device.getDataValue("manufacturer") == "MRVL") { // Handle marvel stack not reporting
+        additionalCmds = refresh()
+    }
+    zigbee.setLevel(value) + additionalCmds
 }
 /**
  * PING is used by Device-Watch in attempt to reach the Device
@@ -103,7 +111,15 @@ def ping() {
 }
 
 def refresh() {
-    zigbee.onOffRefresh() + zigbee.levelRefresh() + zigbee.onOffConfig(0, 300) + zigbee.levelConfig()
+    zigbee.onOffRefresh() + zigbee.levelRefresh()
+}
+
+def installed() {
+    if (((device.getDataValue("manufacturer") == "MRVL") && (device.getDataValue("model") == "MZ100")) || (device.getDataValue("manufacturer") == "OSRAM SYLVANIA") || (device.getDataValue("manufacturer") == "OSRAM")) {
+        if ((device.currentState("level")?.value == null) || (device.currentState("level")?.value == 0)) {
+            sendEvent(name: "level", value: 100)
+        }
+    }
 }
 
 def configure() {
@@ -113,5 +129,5 @@ def configure() {
     sendEvent(name: "checkInterval", value: 2 * 10 * 60 + 1 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
 
     // OnOff minReportTime 0 seconds, maxReportTime 5 min. Reporting interval if no activity
-    zigbee.onOffRefresh() + zigbee.levelRefresh() + zigbee.onOffConfig(0, 300) + zigbee.levelConfig()
+    refresh() + zigbee.onOffConfig(0, 300) + zigbee.levelConfig()
 }
